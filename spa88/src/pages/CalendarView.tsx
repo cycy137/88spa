@@ -2,8 +2,6 @@
 import { useState } from 'react';
 import { Calendar, Badge, Card, List, Button, Modal, Form, InputNumber, Tag, Space, message, Typography, Input, Select, TimePicker } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
 import type { Appointment } from '../type';
 import dayjs, { Dayjs } from 'dayjs';
 import { useStore } from '../store/useStore';
@@ -26,7 +24,7 @@ export default function CalendarView() {
   const appointments = useStore((state) => state.appointments);
   const services = useStore((state) => state.services);
   const staffList = useStore((state) => state.staffList);
-  const loading = useStore((state) => state.loading);
+  // const loading = useStore((state) => state.loading);
 
   const addAppointment = useStore((state) => state.addAppointment);
   const updateAppointment = useStore((state) => state.updateAppointment);
