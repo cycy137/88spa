@@ -1,7 +1,7 @@
 // src/pages/LedgerView.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Table, Card, Button, Space, Input, Select, DatePicker, Tag, Modal, Form, InputNumber, message, Popconfirm } from 'antd';
-import { DownloadOutlined, UploadOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { useStore } from '../store/useStore';
 import type { Appointment } from '../type';
 import dayjs from 'dayjs';

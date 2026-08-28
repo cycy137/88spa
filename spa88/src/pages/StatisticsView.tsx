@@ -18,10 +18,10 @@ export default function StatisticsView() {
   ]);
 
   const appointments = useStore((state) => state.appointments);
-  const loading = useStore((state) => state.loading);
+  // const loading = useStore((state) => state.loading);
 
   // 只筛选出云端账目里“已经服务完成并入账”的单子
-  const completedAppointments = appointments.filter(appt => appt.status === 'completed');
+  // const completedAppointments = appointments.filter(appt => appt.status === 'completed');
 
 
   // ==========================================
