@@ -150,7 +150,7 @@ export default function StatisticsView() {
                     dataKey="value"
                     nameKey="serviceName"
                   >
-                    {serviceChartData.map((entry, index) => (
+                    {serviceChartData.map((_entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
