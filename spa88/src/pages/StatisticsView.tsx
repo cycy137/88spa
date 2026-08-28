@@ -1,13 +1,12 @@
 // src/pages/StatisticsView.tsx
-import React, { useState } from 'react';
-import { Card, Row, Col, Statistic, Table, DatePicker, Space, Typography } from 'antd';
+import { useState } from 'react';
+import { Card, Row, Col, Statistic, Table, DatePicker, Space } from 'antd';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
-const { Title } = Typography;
 
 // 饼图基础色盘
 const COLORS = ['#1890ff', '#52c41a', '#fa8c16', '#722ed1', '#eb2f96', '#13c2c2'];
@@ -95,7 +94,7 @@ export default function StatisticsView() {
       </Card>
 
       {/* 核心财务核心指标核心看版 */}
-      <Row g={[16, 16]}>
+      <Row gutter={[16, 16]}>
         <Col xs={24} sm={8}>
           <Card bordered={false} style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
             <Statistic title="总营业额 (包含项目+小费)" value={totalRevenue} precision={2} suffix="元" valueStyle={{ color: '#1890ff', fontWeight: 'bold' }} />
@@ -114,7 +113,7 @@ export default function StatisticsView() {
       </Row>
 
       {/* 核心可视化分析图表组 */}
-      <Row g={[16, 16]}>
+      <Row gutter={[16, 16]}>
         {/* 技师小费/项目费对比排行榜 */}
         <Col xs={24} lg={14}>
           <Card title="技师业绩与小费排行榜 (Recharts 柱状图分析)" style={{ height: '420px' }}>
@@ -145,7 +144,7 @@ export default function StatisticsView() {
                     cx="50%"
                     cy="50%"
                     labelLine={true}
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percent }) => `${name}: ${(Number(percent || 0) * 100).toFixed(0)}%`}
                     outerRadius={90}
                     fill="#8884d8"
                     dataKey="value"

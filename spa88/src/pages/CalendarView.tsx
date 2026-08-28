@@ -1,6 +1,6 @@
 // src/pages/CalendarView.tsx
-import React, { useState } from 'react';
-import { Calendar, Badge, Card, List, Button, Modal, Form, InputNumber, Tag, Space, message, Typography, Input, Select, DatePicker, TimePicker } from 'antd';
+import { useState } from 'react';
+import { Calendar, Badge, Card, List, Button, Modal, Form, InputNumber, Tag, Space, message, Typography, Input, Select, TimePicker } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';

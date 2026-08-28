@@ -1,7 +1,7 @@
 // src/App.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Layout, Menu, Typography, ConfigProvider } from 'antd';
-import { CalendarOutlined, FileTextOutlined, BarChartOutlined, TeamOutlined } from '@ant-design/icons';
+import { CalendarOutlined, FileTextOutlined, BarChartOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN'; // 引入中文包，让日历变成中文显示
 import CalendarView from './pages/CalendarView';
 import { initMockDataIfEmpty } from './db/mockData';
