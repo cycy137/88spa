@@ -2,15 +2,14 @@
 import React, { useState } from 'react';
 import { Table, Card, Button, Space, Input, Select, DatePicker, Tag, Modal, Form, InputNumber, message, Popconfirm } from 'antd';
 import { DownloadOutlined, UploadOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import { useStore } from '../store/useStore';
 import type { Appointment } from '../type';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
 
 export default function LedgerView() {
-  const [form] = Form.useForm();
+const [form] = Form.useForm();
   const [editForm] = Form.useForm();
   
   // 各种状态控制
@@ -18,15 +17,22 @@ export default function LedgerView() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<Appointment | null>(null);
 
-  // 纯前端筛选条件状态
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
 
-  // 实时读取本地数据库所有的基础表和流水表
-  const appointments = useLiveQuery(() => db.appointments.toArray()) || [];
-  const services = useLiveQuery(() => db.services.toArray()) || [];
-  const staffList = useLiveQuery(() => db.staff.toArray()) || [];
+  // ✨【核心改动】全面换成从云端数据流中提取状态
+  const appointments = useStore((state) => state.appointments);
+  const services = useStore((state) => state.services);
+  const staffList = useStore((state) => state.staffList);
+  const loading = useStore((state) => state.loading); // 还可以顺便把 Table 加上好看的加载动画
+  
+  // 引入云端操作函数
+  const addAppointment = useStore((state) => state.addAppointment);
+  const updateAppointment = useStore((state) => state.updateAppointment);
+  const deleteAppointment = useStore((state) => state.deleteAppointment);
+
+
   // ==========================================
   // 1. 纯前端高级多条件过滤逻辑
   // ==========================================
@@ -42,14 +48,19 @@ export default function LedgerView() {
     let matchDate = true;
     if (dateRange && dateRange[0] && dateRange[1]) {
       const itemTime = dayjs(item.appointmentTime);
-      const start = dateRange[0].startOf('day');
-      const end = dateRange[1].endOf('day');
-      // isSameOrAfter / isSameOrBefore 需要等值判断，我们直接用毫秒值判断最安全
+      
+      // 将数组中的两个 Dayjs 实例分别提取出来
+      const [startDate, endDate] = dateRange;
+      
+      const start = startDate.startOf('day');
+      const end = endDate.endOf('day');
+      
+      // 使用时间戳毫秒值进行精准的前端闭区间范围比对（包含当天）
       matchDate = itemTime.valueOf() >= start.valueOf() && itemTime.valueOf() <= end.valueOf();
     }
 
-    return matchText && matchStatus && matchDate;
-  }).sort((a, b) => dayjs(b.appointmentTime).valueOf() - a.appointmentTime.valueOf()); // 按时间倒序
+      return matchText && matchStatus && matchDate;
+    }).sort((a, b) => dayjs(b.appointmentTime).valueOf() - a.appointmentTime.valueOf()); // 按时间倒序
 
   // ==========================================
   // 2. 散客直接记账逻辑（跳过预约，直接完成）
@@ -66,29 +77,27 @@ export default function LedgerView() {
       const values = await form.validateFields();
       const selectedService = services.find(s => s.id === values.serviceId);
       const selectedStaff = staffList.find(s => s.id === values.staffId);
-
       if (!selectedService || !selectedStaff) return;
 
-      await db.appointments.add({
+      // 直接调用云端添加
+      await addAppointment({
         customerName: values.customerName || '散客',
         staffId: values.staffId,
         staffName: selectedStaff.name,
         serviceId: values.serviceId,
         serviceName: selectedService.name,
-        appointmentTime: new Date(), // 直接记当下的时间
+        appointmentTime: new Date(), 
         duration: values.duration,
         serviceFee: values.serviceFee,
         tip: values.tip || 0,
-        status: 'completed', // 直接是完成入账状态
+        status: 'completed',
         remark: values.remark || '散客直接现付'
       });
 
-      message.success('散客现付账目已成功入账！');
+      message.success('散客现付账目已成功入账至云端 D1 数据库！');
       setIsQuickAddOpen(false);
       form.resetFields();
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
   // ==========================================
@@ -108,96 +117,24 @@ export default function LedgerView() {
     if (!editingRecord || !editingRecord.id) return;
     try {
       const values = await editForm.validateFields();
-      await db.appointments.update(editingRecord.id, {
+      // 调用云端更新
+      await updateAppointment(editingRecord.id, {
         serviceFee: values.serviceFee,
         tip: values.tip,
         remark: values.remark
       });
-      message.success('账目信息已成功更新');
+      message.success('云端数据修改成功！');
       setIsEditOpen(false);
       setEditingRecord(null);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
   const handleDelete = async (id: number) => {
-    await db.appointments.delete(id);
-    message.success('该账目已被彻底删除');
+    await deleteAppointment(id);
+    message.success('该数据已从云端永久移除');
   };
 
-  // ==========================================
-  // 4. 数据一键备份与恢复 (JSON 文件导出/导入)
-  // ==========================================
-  const exportBackupJson = async () => {
-    try {
-      const allAppointments = await db.appointments.toArray();
-      const allServices = await db.services.toArray();
-      const allStaff = await db.staff.toArray();
 
-      const backupData = {
-        version: 1,
-        exportAt: new Date().toISOString(),
-        data: { appointments: allAppointments, services: allServices, staff: allStaff }
-      };
-
-      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `massage_store_backup_${dayjs().format('YYYYMMDD')}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      message.success('备份导出成功！请妥善保存下载的 JSON 文件。');
-    } catch (err) {
-      message.error('导出备份失败');
-    }
-  };
-
-  const importBackupJson = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const json = JSON.parse(event.target?.result as string);
-        if (!json.data || !json.data.appointments) {
-          message.error('错误的备份文件格式');
-          return;
-        }
-
-        Modal.confirm({
-          title: '重要提示：确定导入备份吗？',
-          content: '导入备份会覆盖本地浏览器当前的全部数据，此操作不可逆！',
-          okText: '确认导入并覆盖',
-          okType: 'danger',
-          onOk: async () => {
-            await db.appointments.clear();
-            await db.services.clear();
-            await db.staff.clear();
-
-            // 将恢复的日期字符串转回 Date 对象
-            const parsedAppts = json.data.appointments.map((a: any) => ({
-              ...a,
-              appointmentTime: new Date(a.appointmentTime)
-            }));
-
-            await db.appointments.bulkAdd(parsedAppts);
-            await db.services.bulkAdd(json.data.services || []);
-            await db.staff.bulkAdd(json.data.staff || []);
-
-            message.success('本地数据全部恢复成功，页面已同步刷新！');
-            // 清空上传控件
-            e.target.value = '';
-          }
-        });
-      } catch (err) {
-        message.error('解析备份文件失败，请确保文件未损坏。');
-      }
-    };
-    reader.readAsText(file);
-  };
 
   // Antd 表格列头定义
   const columns = [
@@ -276,8 +213,8 @@ export default function LedgerView() {
       extra={
         <Space flex-wrap="wrap">
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsQuickAddOpen(true)}>散客直接现付记账</Button>
-          <Button icon={<DownloadOutlined />} onClick={exportBackupJson}>导出JSON备份</Button>
-          <Button icon={<UploadOutlined />} style={{ position: 'relative' }}>
+          {/* <Button icon={<DownloadOutlined />} onClick={exportBackupJson}>导出JSON备份</Button> */}
+          {/* <Button icon={<UploadOutlined />} style={{ position: 'relative' }}>
             导入备份恢复
             <input 
               type="file" 
@@ -285,7 +222,7 @@ export default function LedgerView() {
               onChange={importBackupJson} 
               style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} 
             />
-          </Button>
+          </Button> */}
         </Space>
       }
     >
@@ -310,7 +247,8 @@ export default function LedgerView() {
 
         <RangePicker onChange={(dates) => setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}placeholder={['流水开始日期', '结束日期']}/>
             {/* 数据明细大表格 */}
-      <Table 
+      <Table
+        loading={loading}  
         columns={columns} 
         dataSource={filteredData} 
         rowKey="id"

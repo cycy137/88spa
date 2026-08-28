@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout, Menu, Typography, ConfigProvider } from 'antd';
 import { CalendarOutlined, FileTextOutlined, BarChartOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN'; // 引入中文包，让日历变成中文显示
@@ -7,6 +7,7 @@ import CalendarView from './pages/CalendarView';
 import { initMockDataIfEmpty } from './db/mockData';
 import LedgerView from './pages/LedgerView';
 import StatisticsView from './pages/StatisticsView';
+import { useStore } from './store/useStore';
 
 // 初始化本地数据
 initMockDataIfEmpty();
@@ -15,7 +16,13 @@ const { Header, Content, Footer } = Layout;
 const { Title } = Typography;
 
 export default function App() {
+  
   const [currentMenu, setCurrentMenu] = useState('calendar');
+  const fetchInitData = useStore((state) => state.fetchInitData);
+
+  useEffect(() => {
+    fetchInitData();
+  }, [fetchInitData]);
 
   // 导航菜单配置
   const menuItems = [

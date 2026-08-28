@@ -2,9 +2,8 @@
 import { useState } from 'react';
 import { Card, Row, Col, Statistic, Table, DatePicker, Space } from 'antd';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
 import dayjs from 'dayjs';
+import { useStore } from '../store/useStore';
 
 const { RangePicker } = DatePicker;
 
@@ -18,20 +17,28 @@ export default function StatisticsView() {
     dayjs()
   ]);
 
-  // 1. 实时拉取本地数据库所有已完成入账的订单
-  const appointments = useLiveQuery(() => 
-    db.appointments.where('status').equals('completed').toArray()
-  ) || [];
+  const appointments = useStore((state) => state.appointments);
+  const loading = useStore((state) => state.loading);
+
+  // 只筛选出云端账目里“已经服务完成并入账”的单子
+  const completedAppointments = appointments.filter(appt => appt.status === 'completed');
+
 
   // ==========================================
   // 2. 根据日期筛选核心账目流水
   // ==========================================
-  const filteredData = appointments.filter(item => {
-    if (!dateRange) return true;
-    const itemTime = dayjs(item.appointmentTime);
-    return itemTime.valueOf() >= dateRange[0].startOf('day').valueOf() && 
-           itemTime.valueOf() <= dateRange[1].endOf('day').valueOf();
-  });
+const filteredData = appointments.filter(item => {
+  if (!dateRange || !dateRange[0] || !dateRange[1]) return true;
+  const itemTime = dayjs(item.appointmentTime);
+  
+  // ✨ 正确做法：先把数组里的开始时间和结束时间解构出来
+  const [startDate, endDate] = dateRange;
+  
+  const start = startDate.startOf('day');
+  const end = endDate.endOf('day');
+  
+  return itemTime.valueOf() >= start.valueOf() && itemTime.valueOf() <= end.valueOf();
+});
 
   // ==========================================
   // 3. 多维度数据纯前端聚合计算逻辑

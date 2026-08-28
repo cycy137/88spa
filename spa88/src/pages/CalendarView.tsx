@@ -6,6 +6,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
 import type { Appointment } from '../type';
 import dayjs, { Dayjs } from 'dayjs';
+import { useStore } from '../store/useStore';
 
 const { Text } = Typography;
 
@@ -22,9 +23,13 @@ export default function CalendarView() {
   const [createForm] = Form.useForm();
 
   // 1. 实时读取本地数据库中的所有核心数据
-  const appointments = useLiveQuery(() => db.appointments.toArray()) || [];
-  const staffList = useLiveQuery(() => db.staff.where('status').equals('active').toArray()) || [];
-  const servicesList = useLiveQuery(() => db.services.toArray()) || [];
+  const appointments = useStore((state) => state.appointments);
+  const services = useStore((state) => state.services);
+  const staffList = useStore((state) => state.staffList);
+  const loading = useStore((state) => state.loading);
+
+  const addAppointment = useStore((state) => state.addAppointment);
+  const updateAppointment = useStore((state) => state.updateAppointment);
 
   // 获取特定日期的预约列表
   const getListData = (value: Dayjs) => {
@@ -58,7 +63,7 @@ export default function CalendarView() {
 
   // 3. 当新建预约表单中，用户选择某个「项目」时，自动联动时长和标准价格
   const handleServiceChange = (serviceId: number) => {
-    const selectedService = servicesList.find(s => s.id === serviceId);
+    const selectedService = services.find(s => s.id === serviceId);
     if (selectedService) {
       createForm.setFieldsValue({
         duration: selectedService.duration,
@@ -69,11 +74,10 @@ export default function CalendarView() {
 
   // 4. 提交「新建预约」表单
   // 提交创建预约（已修复 toDate / undefined 报错问题）
-  const handleCreateSubmit = async () => {
+const handleCreateSubmit = async () => {
     try {
       const values = await createForm.validateFields();
-    //   console.log(servicesList)
-      const selectedService = servicesList.find(s => s.id === values.serviceId);
+      const selectedService = services.find(s => s.id === values.serviceId);
       const selectedStaff = staffList.find(s => s.id === values.staffId);
 
       if (!selectedService || !selectedStaff) {
@@ -81,26 +85,24 @@ export default function CalendarView() {
         return;
       }
 
-      // 【安全修复】防御性检查：确保时间组件确实拿到了值
       if (!values.timeString) {
         message.error('请选择具体的预约时间');
         return;
       }
 
-      // values.timeString 本身就是一个 dayjs 对象
       const timeInstance = values.timeString;
       const hours = timeInstance.hour();
       const minutes = timeInstance.minute();
 
-      // 基于当前日历选中的日期，设置对应的时和分
       const finalAppointmentTime = selectedDate
         .hour(hours)
         .minute(minutes)
         .second(0)
         .millisecond(0)
-        .toDate(); // 转换为标准的 Date 对象存入数据库
+        .toDate();
 
-      await db.appointments.add({
+      // ✨ 调用云端提交方法
+      await addAppointment({
         customerName: values.customerName,
         customerPhone: values.customerPhone || '',
         staffId: values.staffId,
@@ -115,11 +117,11 @@ export default function CalendarView() {
         remark: values.remark || ''
       });
 
-      message.success('预约创建成功！');
+      message.success('云端预约创建成功！');
       setIsCreateModalOpen(false);
       createForm.resetFields();
     } catch (err) {
-      console.error('表单验证或写入数据库失败:', err);
+      console.error(err);
     }
   };
 
@@ -136,11 +138,12 @@ export default function CalendarView() {
     if (!currentAppt || !currentAppt.id) return;
     try {
       const values = await tipForm.validateFields();
-      await db.appointments.update(currentAppt.id, {
+      // ✨ 调用云端更新状态和补录小费
+      await updateAppointment(currentAppt.id, {
         status: 'completed',
         tip: values.tip || 0
       });
-      message.success('该笔预约已完成服务，账目已入账！');
+      message.success('服务完成，账目已完美入库云端！');
       setIsTipModalOpen(false);
       setCurrentAppt(null);
     } catch (err) {
@@ -152,12 +155,13 @@ export default function CalendarView() {
   const handleCancelAppt = async (id: number) => {
     Modal.confirm({
       title: '确定要取消这笔预约吗？',
-      content: '取消后此预约将不计入营业额统计。',
+      content: '取消后此预约将同步更新至云端，且不计入账目统计。',
       okText: '确定取消',
       okType: 'danger',
       cancelText: '再想想',
       onOk: async () => {
-        await db.appointments.update(id, { status: 'cancelled' });
+        // ✨ 调用云端更新状态为取消
+        await updateAppointment(id, { status: 'cancelled' });
         message.warning('预约已取消');
       }
     });
@@ -289,7 +293,7 @@ export default function CalendarView() {
             <Select 
               placeholder="选择项目" 
               onChange={handleServiceChange}
-              options={servicesList.map(s => ({ value: s.id, label: `${s.name} (${s.price}元/${s.duration}分钟)` }))} 
+              options={services.map(s => ({ value: s.id, label: `${s.name} (${s.price}元/${s.duration}分钟)` }))} 
               />
           </Form.Item>
 
