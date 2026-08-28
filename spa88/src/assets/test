@@ -1,0 +1,115 @@
+using System;
+using System.Collections.Generic;
+
+/*
+     An interval is defined as a range of numbers on a number line
+
+     Example: Intervals 1,3 and 2,4
+     -1  0  1  2  3  4  5  6
+            |-----|
+               |-----|
+
+     Given a list of intervals, find any that overlap, merge them, and return a list of merged intervals
+     Example: Intervals 1,3 and 2,4 merge into a single interval 1,4
+     -1  0  1  2  3  4  5  6
+            |--------|
+*/
+
+class Program
+{
+    static void Main()
+    {
+        Program p = new Program();
+        p.Run();
+    }
+
+    class Interval : IComparable<Interval>
+    {
+        public int Start;
+        public int End;
+
+        public Interval(int s, int e) { Start = s; End = e; }
+
+        public int CompareTo(Interval? other)
+        {
+            if (other == null) return 1;
+            else if (Start == other.Start) return 0;
+            else return (Start > other.Start ? 1 : -1);
+        }
+
+        public bool Overlaps(Interval other)
+        {
+            // Assumes intervals are sorted, and other comes after this one
+            return other.Start >= End;
+        }
+
+        public void Merge(Interval other)
+        {
+            // Assumes intervals are sorted, and other comes after this one
+            End = other.End > End ? other.End : End;
+        }
+    }
+
+    void Run()
+    {
+        // Expected output: (0, 5), (10, 15), (20, 30), (40, 50)
+        List<Interval> testData = new List<Interval> {
+            new Interval(0, 3),
+            new Interval(2, 4),
+            new Interval(3, 5),
+
+            new Interval(10, 15),
+            new Interval(10, 11),
+
+            new Interval(20, 30),
+            new Interval(22, 24),
+            new Interval(26, 28),
+
+            new Interval(40, 50)
+        };
+        List<Interval> results = MergeIntervals(testData);
+        foreach (Interval interval in results)
+        {
+            Console.WriteLine($"{interval.Start}, {interval.End}");
+        }
+    }
+
+    // Take an interval, merge any intervals it overlaps with, add it to the list of finished intervals, and repeat until we have looked at all intervals
+    List<Interval> MergeIntervals(Queue<Interval> intervals)
+    {
+        // Presort our intervals to reduce complexity, allowing us to only traverse the list once
+        intervals.Sort();
+
+        List<Interval> merged = new List<Interval>();
+        stack merged
+        // Current represents an interval that we are currently merging into. We will operate on current until we find an interval that does not overlap
+        if(intervals.Count >1) {
+            Interval current = intervals[0];
+           for (int i = 1; i < intervals.Count; ++i)
+            {
+                if (current.Overlaps(intervals[i]))
+                {
+                    // There's overlap with the current interval, merge this one in and continue
+                    current.Merge(intervals[i]);
+                    if(i == intervals.Count-1){
+                        merged.Add(current);
+                    }
+                }
+                else
+                {
+                    // No overlap, which means we're done with the current interval
+                    // Add it to the merged list and set up a new current interval
+                    merged.Add(current);
+                    current = intervals[i];
+                }
+            }
+        }else if(intervals.Count == 1){
+            merged.Add(intervals[0]);
+        }
+
+
+        return merged;
+    }
+}
+
+ 
