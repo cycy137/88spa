@@ -40,5 +40,11 @@ export interface Appointment {
   // booked: 已预约未服务, completed: 服务完成(计入账目统计), cancelled: 已取消
   status: 'booked' | 'completed' | 'cancelled'; 
   
+
+  payCash?: number;
+  payCard?: number;
+  payGiftCard?: number;
+  usePunchCard?: number; // 0 或 1
+
   remark?: string;      // 备注 (如：客户要求力道大一点、加钟等)
 }

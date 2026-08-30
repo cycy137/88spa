@@ -80,7 +80,10 @@ export const useStore = create<StoreState>((set, get) => ({
         body: JSON.stringify({ id, ...data })
       });
       if (res.ok) {
-        await get().fetchInitData();
+        // ✨【关键】确保这行代码存在，它会让所有正在看大列表的手机和电脑秒级刷出新状态
+        await get().fetchInitData(); 
+      } else {
+        throw new Error("云端数据库拒接了此次更新");
       }
     } catch (err) {
       console.error("更新账目失败:", err);
