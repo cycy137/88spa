@@ -219,33 +219,76 @@ export default function LedgerView() {
   // ==========================================
   const handleEditClick = (record: Appointment) => {
     setCurrentRecord(record);
-    // 清理掉前缀标记回显给老板修改
+    // 提取纯净备注
     const cleanRemark = record.remark?.replace('[已对账结单]', '').trim() || '';
+    
+    // 将云端 D1 里的各个渠道金额和打卡状态回显到修改表单中
     editForm.setFieldsValue({
       serviceFee: record.serviceFee,
+      usePunchCard: record.usePunchCard === 1, // 转换为布尔值
+      payCash: record.payCash || 0,
+      payCard: record.payCard || 0,
+      payGiftCard: record.payGiftCard || 0,
       tip: record.tip,
       remark: cleanRemark
     });
     setIsEditOpen(true);
   };
 
+  // ==========================================
+  // 【新规则对齐版】提交修正：多渠道数据严密同步
+  // ==========================================
   const handleEditSubmit = async () => {
     if (!currentRecord || !currentRecord.id) return;
     try {
       const values = await editForm.validateFields();
-      // 保持账目结单标记不变
-      const isPaidBefore = currentRecord.remark?.includes('[已对账结单]');
-      const finalRemark = isPaidBefore ? `[已对账结单] ${values.remark || ''}`.trim() : values.remark;
+      
+      const isPunchCardChecked = values.usePunchCard || false;
+      const discount = isPunchCardChecked ? 30 : 0;
+      
+      // 计算修正后【必须实收】的总金额
+      const baseFee = values.serviceFee || 0;
+      const finalRequired = Math.max(0, baseFee - discount);
 
+      // 数值纯化
+      const cash = Number(values.payCash || 0);
+      const card = Number(values.payCard || 0);
+      const gift = Number(values.payGiftCard || 0);
+      const totalPaid = cash + card + gift;
+
+      // 智能配平防御：如果老板动手改了渠道分摊，必须算平
+      let finalCash = cash;
+      if (totalPaid === 0 && finalRequired > 0) {
+        finalCash = finalRequired; // 没手动拆，保底全算现金
+      } else if (totalPaid !== finalRequired) {
+        message.error(`修正失败！更正后的项目费扣除减免应收 ${finalRequired} 元，当前输入组合支付总计 ${totalPaid} 元，请配平。`);
+        return;
+      }
+
+      // 保持账目结单标记不变，拼装新备注
+      const paymentBreakdown = `[已对账结单] 支付构成: (现金:${finalCash}元 | 刷卡:${card}元 | 礼品卡:${gift}元)${isPunchCardChecked ? ' [使用Punch Card减免30元]' : ''}`;
+      const finalRemark = values.remark ? `${paymentBreakdown} | 备注: ${values.remark}` : paymentBreakdown;
+
+      // 原子级同步推送到云端 D1 数据库
       await updateAppointment(currentRecord.id, {
-        serviceFee: values.serviceFee,
-        tip: values.tip,
+        serviceFee: baseFee, // 项目面原价
+        tip: Number(values.tip || 0),
+        payCash: finalCash,
+        payCard: card,
+        payGiftCard: gift,
+        usePunchCard: isPunchCardChecked ? 1 : 0,
         remark: finalRemark
       });
-      message.success('云端对账修正成功！');
+
+      // 强刷大列表
+      await fetchInitData();
+
+      message.success('云端历史对账账目已成功精准修正！');
       setIsEditOpen(false);
       setCurrentRecord(null);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleDelete = async (id: number) => {
@@ -633,9 +676,9 @@ export default function LedgerView() {
         </Form>
       </Modal>
 
-      {/* 弹窗 C：历史对账流水修正 */}
+      {/* 弹窗 C：历史对账流水多渠道修正子系统 Modal */}
       <Modal
-        title="修正历史对账流水"
+        title="修正历史对账流水 (多渠道与自动减免)"
         open={isEditOpen}
         onOk={handleEditSubmit}
         onCancel={() => { setIsEditOpen(false); setCurrentRecord(null); }}
@@ -644,17 +687,85 @@ export default function LedgerView() {
         destroyOnClose
       >
         <Form form={editForm} layout="vertical"> 
-          <Form.Item label="更正项目费 (元)" name="serviceFee" rules={[{ required: true }]}>
+          {/* 实时动态核算看板 */}
+          <Form.Item shouldUpdate={(prev, curr) => prev.usePunchCard !== curr.usePunchCard || prev.serviceFee !== curr.serviceFee}>
+            {({ getFieldValue }) => {
+              const baseFee = getFieldValue('serviceFee') || 0;
+              const checked = getFieldValue('usePunchCard');
+              const discount = checked ? 30 : 0;
+              const finalNeeded = Math.max(0, baseFee - discount);
+
+              return (
+                <div style={{ marginBottom: 16, backgroundColor: '#f9f9f9', padding: '14px', borderRadius: '8px', border: '1px solid #d9d9d9' }}>
+                  <p style={{ margin: '0 0 4px 0', color: '#595959' }}>当前更正项目原价: {baseFee} 元</p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #d9d9d9', paddingTop: '8px', marginTop: '4px' }}>
+                    <span>打卡券扣减: <span style={{ color: '#ff4d4f' }}>-{discount} 元</span></span>
+                    <span>✨ 更正后实收总金额: <b style={{ color: '#52c41a', fontSize: '18px' }}>{finalNeeded} 元</b></span>
+                  </div>
+                </div>
+              );
+            }}
+          </Form.Item>
+
+          <Form.Item label="更正项目账面原价 (元)" name="serviceFee" rules={[{ required: true }]}>
+            <InputNumber 
+              min={0} 
+              style={{ width: '100%' }} 
+              onChange={(val) => {
+                const checked = editForm.getFieldValue('usePunchCard');
+                const finalNeeded = checked ? Math.max(0, Number(val || 0) - 30) : Number(val || 0);
+                editForm.setFieldsValue({ payCash: finalNeeded, payCard: 0, payGiftCard: 0 });
+              }}
+            />
+          </Form.Item>
+
+          {/* 选项：是否使用打卡减免 */}
+          <Form.Item name="usePunchCard" valuePropName="checked" style={{ marginBottom: 16 }}>
+            <Select 
+              placeholder="是否使用 Punch Card 减免"
+              options={[
+                { value: false, label: '不使用 Punch Card (按更正原价结算)' },
+                { value: true, label: '🎟️ 使用 Punch Card (现场立减 30 元)' }
+              ]}
+              onChange={(val) => {
+                const baseFee = editForm.getFieldValue('serviceFee') || 0;
+                const finalNeeded = val ? Math.max(0, baseFee - 30) : baseFee;
+                editForm.setFieldsValue({ payCash: finalNeeded, payCard: 0, payGiftCard: 0 });
+              }}
+            />
+          </Form.Item>
+
+          {/* 三种混合付款通道拆分栏 */}
+          <Card title="更正付款方式拆分" size="small" style={{ marginBottom: 16, backgroundColor: '#fafafa' }}>
+            <Row gutter={12}>
+              <Col span={8}>
+                <Form.Item label="💵 现金支付" name="payCash">
+                  <InputNumber min={0} style={{ width: '100%' }} precision={2} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item label="💳 刷卡支付" name="payCard">
+                  <InputNumber min={0} style={{ width: '100%' }} precision={2} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item label="🎁 礼品卡" name="payGiftCard">
+                  <InputNumber min={0} style={{ width: '100%' }} precision={2} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+
+          <Form.Item label="更正小费金额 (元)" name="tip" rules={[{ required: true }]}>
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="更正小费 (元)" name="tip" rules={[{ required: true }]}>
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
+
           <Form.Item label="修改备注" name="remark">
-            <Input />
+            <Input placeholder="修正原因说明" />
           </Form.Item>
         </Form>
       </Modal>
+
     </Card>
   );
 }
