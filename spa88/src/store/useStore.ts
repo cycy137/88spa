@@ -28,7 +28,7 @@ interface StoreState {
   setAuthRequired: (v: boolean) => void;
   addAppointment: (appt: Omit<Appointment, 'id'>) => Promise<void>;
   updateAppointment: (id: number, data: Partial<Appointment>) => Promise<void>;
-  deleteAppointment: (id: number, data: Partial<Appointment>) => Promise<void>;
+  deleteAppointment: (id: number) => Promise<void>;
 }
 
 export const useStore = create<StoreState>((set, get) => ({
