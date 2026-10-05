@@ -1,0 +1,21 @@
+# 88spa：API Worker + 前端静态资源，一次 push 全量部署
+# 推送到 main 分支后，Cloudflare 自动：构建前端 → 部署本 Worker（含 API + 页面）
+
+name = "88spa"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# 前端构建产物目录
+# 构建命令（在 Cloudflare 后台 Settings → Build 里设置）：
+#   Build command: cd spa88 && npm ci && npm run build
+#   Deploy command: npx wrangler deploy
+[assets]
+directory = "./spa88/dist"
+not_found_handling = "single-page-application"
+
+# D1 数据库绑定（绑定名必须叫 MY_BINDING，worker.js 里写死的）
+# 去 Cloudflare 后台 Workers → 88spa → Settings → Bindings 里抄 database_name 和 database_id 填到下面
+[[d1_databases]]
+binding = "MY_BINDING"
+database_name = "spa"
+database_id = "a6c0892a-d386-493f-9a15-ff95003706d9"
