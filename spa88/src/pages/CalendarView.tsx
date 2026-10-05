@@ -308,11 +308,11 @@ export default function CalendarView() {
               </div>
 
               {/* 备注栏 */}
-              {item.remark && (
-                <div style={{ fontSize: '12px', color: '#fa8c16', backgroundColor: '#fffbe6', padding: '6px 10px', borderRadius: '6px', marginTop: '10px', border: '1px solid #ffe58f' }}>
-                  📌 备注: {item.remark}
-                </div>
-              )}
+              {(item.remark || item.notes) && (
+                  <div style={{ fontSize: '12px', color: '#fa8c16', backgroundColor: '#fffbe6', padding: '6px 10px', borderRadius: '6px', marginTop: '10px', border: '1px solid #ffe58f' }}>
+                    📌 备注: {item.remark || ''} {item.notes ? `[官网附言: ${item.notes}]` : ''}
+                  </div>
+                )}
 
               {/* 底部按钮区：针对大拇指触控优化的微型独立胶囊操作块 */}
               <div style={{ display: 'flex', justifyContent: 'end', marginTop: '12px', gap: '8px', borderTop: '1px solid #f0f0f0', paddingTop: '10px' }}>

@@ -1,6 +1,6 @@
 // src/pages/StatisticsView.tsx
 import { useState } from 'react';
-import { Card, Row, Col, Statistic, Table, DatePicker, Space } from 'antd';
+import { Card, Row, Col, Statistic, Table, DatePicker, Space, Radio } from 'antd';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useStore } from '../store/useStore';
 import dayjs from 'dayjs';
@@ -17,9 +17,17 @@ export default function StatisticsView() {
     dayjs()
   ]);
 
+  // 显示口径：自己统计（实际金额）/ 员工发钱（项目费抹零到整十）
+  const [mode, setMode] = useState<'actual' | 'payout'>('actual');
+
   // 从 Zustand Store 提取云端全量账目状态与加载器
   const appointments = useStore((state) => state.appointments);
   const loading = useStore((state) => state.loading);
+
+  // 抹零：向下取整到十位（如 105→100）
+  const floor10 = (n: number) => Math.floor(Number(n || 0) / 10) * 10;
+  // 按当前口径取每条的项目费
+  const effFee = (item: any) => mode === 'payout' ? floor10(item.serviceFee) : Number(item.serviceFee || 0);
 
   // 只筛选出云端账目里“已经完全对账结单”的完成流水（带有结单备注标记）
   const completedAppointments = appointments.filter(
@@ -38,46 +46,61 @@ export default function StatisticsView() {
   // ==========================================
   // ⚡ 核心：全新多渠道独立资金核算逻辑
   // ==========================================
-  let totalServiceFee = 0;   // 项目账面原价总额
+  let totalServiceFee = 0;   // 项目账面原价总额（按当前口径）
   let totalTip = 0;          // 实收小费总额
   let totalCash = 0;         // 实收现金总额
   let totalCard = 0;         // 实收刷卡总额
   let totalGiftCard = 0;     // 实收礼品卡总额
   let punchCardCount = 0;    // Punch Card 使用总次数
+  let totalServiceNet = 0;   // 项目净收入（口径一致：抹零后减打折，供发钱模式用）
 
   const staffMap: Record<string, { staffName: string; serviceFee: number; tip: number; count: number }> = {};
 
+  // 加项统计
+  let addonHuangCount = 0, addonHuangTotal = 0;
+  let addonBaguanCount = 0, addonBaguanTotal = 0;
+  let addonCbdCount = 0, addonCbdTotal = 0;
+
   filteredData.forEach(item => {
-    totalServiceFee += item.serviceFee;
+    totalServiceFee += effFee(item);
     totalTip += item.tip;
     
     // 累加各个独立渠道的实收硬币/钞票
     totalCash += Number(item.payCash || 0);
     totalCard += Number(item.payCard || 0);
     totalGiftCard += Number(item.payGiftCard || 0);
+
+    // 加项明细统计（加项本身是固定价，不抹零）
+    if (item.addonHuangdaoyi) { addonHuangCount++; addonHuangTotal += Number(item.addonHuangdaoyi); }
+    if (item.addonBaguan) { addonBaguanCount++; addonBaguanTotal += Number(item.addonBaguan); }
+    if (item.addonCbd) { addonCbdCount++; addonCbdTotal += Number(item.addonCbd); }
     
     // 累计打卡打折次数 (SQLite 存的是 1 或 0)
     if (item.usePunchCard === 1) {
       punchCardCount += 1;
     }
+    // 口径一致的项目净收入
+    totalServiceNet += Math.max(0, effFee(item) - (item.usePunchCard === 1 ? 30 : 0));
 
     // 技师业绩提成树累加
     if (!staffMap[item.staffName]) {
       staffMap[item.staffName] = { staffName: item.staffName, serviceFee: 0, tip: 0, count: 0 };
     }
     // 技师项目费业绩以实收项目费（原价减去打折）计算更符合扣点规则
+    // 员工发钱口径下先抹零到整十
     const discount = item.usePunchCard === 1 ? 30 : 0;
-    const actualStaffServiceFee = Math.max(0, item.serviceFee - discount);
+    const actualStaffServiceFee = Math.max(0, effFee(item) - discount);
     
     staffMap[item.staffName].serviceFee += actualStaffServiceFee;
     staffMap[item.staffName].tip += item.tip;
     staffMap[item.staffName].count += 1;
   });
 
-  // 1. 实收纯项目总金额 (三大渠道之和)
+  // 1. 实收纯项目总金额：自己统计用三大渠道之和；员工发钱用抹零口径的项目净收入
   const actualTotalServicePaid = totalCash + totalCard + totalGiftCard;
-  // 2. 真实总营业额 = 渠道项目费总和 + 额外实收小费
-  const netRevenue = actualTotalServicePaid + totalTip;
+  const displayServiceTotal = mode === 'payout' ? totalServiceNet : actualTotalServicePaid;
+  // 2. 真实总营业额 = 项目费总和 + 额外实收小费
+  const netRevenue = displayServiceTotal + totalTip;
   // 3. 累计让利打折损失
   const totalDiscountGiven = punchCardCount * 30;
 
@@ -95,23 +118,39 @@ export default function StatisticsView() {
   const staffColumns = [
     { title: '技师姓名/工号', dataIndex: 'staffName', key: 'staffName' },
     { title: '完成服务单数', dataIndex: 'count', key: 'count', sorter: (a: any, b: any) => a.count - b.count },
-    { title: '实收项目业绩(扣减打折)', dataIndex: 'serviceFee', key: 'serviceFee', render: (val: number) => `${val.toFixed(2)} 元`, sorter: (a: any, b: any) => a.serviceFee - b.serviceFee },
+    { title: mode === 'payout' ? '实收项目业绩(已抹零+扣减打折)' : '实收项目业绩(扣减打折)', dataIndex: 'serviceFee', key: 'serviceFee', render: (val: number) => `${val.toFixed(2)} 元`, sorter: (a: any, b: any) => a.serviceFee - b.serviceFee },
     { title: '所获小费总额', dataIndex: 'tip', key: 'tip', render: (val: number) => `${val.toFixed(2)} 元`, style: { color: '#52c41a' }, sorter: (a: any, b: any) => a.tip - b.tip },
     { title: '员工总薪资参考(业绩+小费)', key: 'total', render: (record: any) => <b style={{ color: '#1890ff' }}>{(record.serviceFee + record.tip).toFixed(2)} 元</b> }
   ];
 
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      {/* 顶部查账周期选择 */}
+      {/* 顶部查账周期选择 + 显示口径切换 */}
       <Card size="small" style={{ borderRadius: '8px' }}>
-        <Space align="center">
+        <Space align="center" wrap>
           <span style={{ fontWeight: 'bold', color: '#595959' }}>核算周期：</span>
           <RangePicker 
             value={dateRange} 
             onChange={(dates) => setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
             allowClear={false}
           />
+          <span style={{ fontWeight: 'bold', color: '#595959', marginLeft: 16 }}>显示口径：</span>
+          <Radio.Group
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            optionType="button"
+            buttonStyle="solid"
+            options={[
+              { value: 'actual', label: '📊 自己统计' },
+              { value: 'payout', label: '💰 员工发钱' },
+            ]}
+          />
         </Space>
+        {mode === 'payout' && (
+          <div style={{ marginTop: 8, color: '#8c8c8c', fontSize: '13px' }}>
+            💰 员工发钱口径：每条项目费已向下抹零到整十（如 105→100）再扣减打卡优惠；小费与各实收渠道为实际金额。加项明细不参与抹零。
+          </div>
+        )}
       </Card>
 
       {/* 核心财务多功能看盘 */}
@@ -128,7 +167,7 @@ export default function StatisticsView() {
         </Col>
         <Col xs={24} sm={6}>
           <Card bordered={false} style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderLeft: '4px solid #fa8c16', borderRadius: '4px' }}>
-            <Statistic title="项目实收扣点总额" loading={loading} value={actualTotalServicePaid} precision={2} suffix="元" valueStyle={{ color: '#fa8c16' }} />
+            <Statistic title={mode === 'payout' ? "项目应发提成基数 (已抹零)" : "项目实收扣点总额"} loading={loading} value={displayServiceTotal} precision={2} suffix="元" valueStyle={{ color: '#fa8c16' }} />
           </Card>
         </Col>
         <Col xs={24} sm={6}>
@@ -149,6 +188,21 @@ export default function StatisticsView() {
           </Col>
           <Col span={8}>
             <Statistic title="🎁 礼品卡消耗扣减" value={totalGiftCard} precision={2} suffix="元" valueStyle={{ color: '#722ed1' }} />
+          </Col>
+        </Row>
+      </Card>
+
+      {/* 加项统计 */}
+      <Card title="加项明细统计" size="small" style={{ borderRadius: '8px' }}>
+        <Row style={{ textAlign: 'center' }}>
+          <Col span={8}>
+            <Statistic title="🌿 黄道益" value={addonHuangTotal} precision={2} suffix={`元 (${addonHuangCount}次)`} valueStyle={{ color: '#52c41a' }} />
+          </Col>
+          <Col span={8} style={{ borderLeft: '1px solid #f0f0f0', borderRight: '1px solid #f0f0f0' }}>
+            <Statistic title="🏺 拔罐" value={addonBaguanTotal} precision={2} suffix={`元 (${addonBaguanCount}次)`} valueStyle={{ color: '#fa8c16' }} />
+          </Col>
+          <Col span={8}>
+            <Statistic title="💧 CBD" value={addonCbdTotal} precision={2} suffix={`元 (${addonCbdCount}次)`} valueStyle={{ color: '#722ed1' }} />
           </Col>
         </Row>
       </Card>

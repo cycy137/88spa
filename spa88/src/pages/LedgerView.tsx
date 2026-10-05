@@ -1,6 +1,6 @@
 // src/pages/LedgerView.tsx
 import { useState } from 'react';
-import { Table, Card, Button, Space, Input, Select, DatePicker, Tag, Modal, Form, InputNumber, message, Popconfirm, Typography, Row, Col } from 'antd';
+import { Table, Card, Button, Space, Input, Select, DatePicker, Tag, Modal, Form, InputNumber, message, Popconfirm, Typography, Row, Col, Checkbox } from 'antd';
 import { SearchOutlined, PlusOutlined, DollarOutlined } from '@ant-design/icons';
 import { useStore } from '../store/useStore';
 import type { Appointment } from '../type';
@@ -8,6 +8,29 @@ import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
+
+// 额外加项定义：可多选，可与打卡减免共存；金额计入 serviceFee，此处存明细供统计
+const ADDON_PRICES: Record<string, number> = { huangdaoyi: 10, baguan: 30, cbd: 25 };
+const ADDON_OPTIONS = [
+  { label: '黄道益 (+10元)', value: 'huangdaoyi' },
+  { label: '拔罐 (+30元)', value: 'baguan' },
+  { label: 'CBD (+25元)', value: 'cbd' },
+];
+// 根据勾选的加项 key 算出各加项金额
+const addonAmounts = (keys: string[]) => ({
+  addonHuangdaoyi: keys.includes('huangdaoyi') ? 10 : 0,
+  addonBaguan: keys.includes('baguan') ? 30 : 0,
+  addonCbd: keys.includes('cbd') ? 25 : 0,
+});
+const addonTotalOf = (keys: string[]) => keys.reduce((sum, k) => sum + (ADDON_PRICES[k] || 0), 0);
+// 表格加项列展示用
+const addonLabels = (record: { addonHuangdaoyi?: number; addonBaguan?: number; addonCbd?: number }) => {
+  const parts: string[] = [];
+  if (record.addonHuangdaoyi) parts.push(`黄道益+${record.addonHuangdaoyi}`);
+  if (record.addonBaguan) parts.push(`拔罐+${record.addonBaguan}`);
+  if (record.addonCbd) parts.push(`CBD+${record.addonCbd}`);
+  return parts.join('、');
+};
 
 export default function LedgerView() {
   const [form] = Form.useForm();
@@ -25,6 +48,7 @@ export default function LedgerView() {
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('all');
+  const [staffFilter, setStaffFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
 
   // 从 Zustand Store 实时拉取云端数据流与核心操作
@@ -72,15 +96,40 @@ export default function LedgerView() {
       matchDate = itemTime.valueOf() >= start.valueOf() && itemTime.valueOf() <= end.valueOf();
     }
 
-    return matchText && matchStatus && matchPayment && matchDate;
+    // 技师过滤
+    const matchStaff = staffFilter === 'all' ? true : String(item.staffId) === staffFilter;
+
+    return matchText && matchStatus && matchPayment && matchDate && matchStaff;
   }).sort((a, b) => dayjs(b.appointmentTime).valueOf() - a.appointmentTime.valueOf());
 
-  // 散客选择服务项目自动联动
+  // 散客选择服务项目自动联动（切项目时加项清零重来）
   const handleServiceChange = (serviceId: number) => {
     const service = services.find(s => s.id === serviceId);
     if (service) {
-      form.setFieldsValue({ duration: service.duration, serviceFee: service.price });
+      form.setFieldsValue({ duration: service.duration, serviceFee: service.price, addonKeys: [], addonHuangdaoyi: 0, addonBaguan: 0, addonCbd: 0 });
     }
+  };
+
+  // 加项多选变化：按增量调整项目费（金额计入 serviceFee），并同步支付拆分
+  const handleAddonChange = (keys: string[], formInstance: any) => {
+    const next = addonAmounts(keys);
+    const prevTotal = Number(formInstance.getFieldValue('addonHuangdaoyi') || 0)
+      + Number(formInstance.getFieldValue('addonBaguan') || 0)
+      + Number(formInstance.getFieldValue('addonCbd') || 0);
+    const nextTotal = next.addonHuangdaoyi + next.addonBaguan + next.addonCbd;
+    const diff = nextTotal - prevTotal;
+    const currentFee = Number(formInstance.getFieldValue('serviceFee') || 0);
+    const nextFee = Math.max(0, currentFee + diff);
+    // 支付拆分跟着走：打卡减免照常可叠加
+    const checked = formInstance.getFieldValue('usePunchCard');
+    const discount = checked ? 30 : 0;
+    const finalNeeded = Math.max(0, nextFee - discount);
+    formInstance.setFieldsValue({
+      addonKeys: keys,
+      serviceFee: nextFee,
+      payCash: finalNeeded, payCard: 0, payGiftCard: 0,
+      ...next,
+    });
   };
 
   // ==========================================
@@ -122,6 +171,7 @@ export default function LedgerView() {
       }
 
       // 提交到 Cloudflare D1 云数据库，新字段独立落库
+      const addonKeys: string[] = values.addonKeys || [];
       await addAppointment({
         customerName: values.customerName || '散客',
         staffId: values.staffId,
@@ -130,12 +180,13 @@ export default function LedgerView() {
         serviceName: selectedService.name,
         appointmentTime: new Date(), // 直接记当下的时间
         duration: values.duration,
-        serviceFee: baseFee, // 存储项目的原价费用
+        serviceFee: baseFee, // 存储项目的原价费用（含加项）
         tip: Number(values.tip || 0),
         payCash: finalCash,
         payCard: card,
         payGiftCard: gift,
         usePunchCard: isPunchCardChecked ? 1 : 0,
+        ...addonAmounts(addonKeys),
         status: 'completed', // 散客直接现付，状态一步到位完成
         remark: `[已对账结单] ${values.remark || ''}`.trim()
       });
@@ -156,7 +207,15 @@ export default function LedgerView() {
   // ==========================================
   const handleCheckoutClick = (record: Appointment) => {
     setCurrentRecord(record);
-    checkoutForm.setFieldsValue({ tip: 0, remark: record.remark || '' });
+    // 预填已存的支付构成与小费，避免打开是 0 导致误提交覆盖
+    checkoutForm.setFieldsValue({
+      tip: record.tip || 0,
+      remark: record.remark || '',
+      payCash: record.payCash || 0,
+      payCard: record.payCard || 0,
+      payGiftCard: record.payGiftCard || 0,
+      usePunchCard: record.usePunchCard === 1,
+    });
     setIsCheckoutOpen(true);
   };
 
@@ -230,7 +289,16 @@ export default function LedgerView() {
       payCard: record.payCard || 0,
       payGiftCard: record.payGiftCard || 0,
       tip: record.tip,
-      remark: cleanRemark
+      remark: cleanRemark,
+      // 加项回显
+      addonKeys: [
+        ...(record.addonHuangdaoyi ? ['huangdaoyi'] : []),
+        ...(record.addonBaguan ? ['baguan'] : []),
+        ...(record.addonCbd ? ['cbd'] : []),
+      ],
+      addonHuangdaoyi: record.addonHuangdaoyi || 0,
+      addonBaguan: record.addonBaguan || 0,
+      addonCbd: record.addonCbd || 0,
     });
     setIsEditOpen(true);
   };
@@ -271,12 +339,13 @@ export default function LedgerView() {
 
       // 原子级同步推送到云端 D1 数据库
       await updateAppointment(currentRecord.id, {
-        serviceFee: baseFee, // 项目面原价
+        serviceFee: baseFee, // 项目面原价（含加项）
         tip: Number(values.tip || 0),
         payCash: finalCash,
         payCard: card,
         payGiftCard: gift,
         usePunchCard: isPunchCardChecked ? 1 : 0,
+        ...addonAmounts(values.addonKeys || []),
         remark: finalRemark
       });
 
@@ -330,6 +399,18 @@ export default function LedgerView() {
       align: 'right' as const, // 金额右对齐，更符合财务规范
       width: 110,
       render: (fee: number) => <Text strong style={{ fontSize: '14px' }}>{fee} 元</Text>,
+    },
+    {
+      title: '加项',
+      key: 'addons',
+      width: 130,
+      ellipsis: true,
+      render: (_: any, record: Appointment) => {
+        const labels = addonLabels(record);
+        return labels
+          ? <Tag color="purple" style={{ borderRadius: '4px', margin: 0 }}>{labels}</Tag>
+          : <span style={{ color: '#bfbfbf' }}>-</span>;
+      },
     },
     {
       title: '实收小费',
@@ -459,6 +540,15 @@ export default function LedgerView() {
             style={{ width: 140 }}
             options={[{ value: 'all', label: '全部账目状态' },{ value: 'pending', label: '⚠️ 待核算结账' },{ value: 'paid', label: '✅ 已对账结单' },]}
             />
+            <Select
+              value={staffFilter}
+              onChange={setStaffFilter}
+              style={{ width: 130 }}
+              options={[
+                { value: 'all', label: '全部技师' },
+                ...staffList.filter(s => s.status === 'active').map(s => ({ value: String(s.id), label: s.name }))
+              ]}
+            />
         <RangePicker onChange={(dates) => setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}placeholder={['流水开始日期', '结束日期']}/>
         </div>
             {/* 数据明细大表格 */}
@@ -483,7 +573,7 @@ export default function LedgerView() {
         <Form 
           form={form} 
           layout="vertical" 
-          initialValues={{ duration: 60, serviceFee: 0, tip: 0, customerName: '散客', usePunchCard: false, payCash: 0, payCard: 0, payGiftCard: 0 }}
+          initialValues={{ duration: 60, serviceFee: 0, tip: 0, customerName: '散客', usePunchCard: false, payCash: 0, payCard: 0, payGiftCard: 0, addonKeys: [], addonHuangdaoyi: 0, addonBaguan: 0, addonCbd: 0 }}
         >
           <Form.Item label="顾客称呼" name="customerName">
             <Input placeholder="散客" />
@@ -499,16 +589,18 @@ export default function LedgerView() {
           </Form.Item>
 
           {/* 实时动态核算看板 (当散客选了项目或点打卡时，这里实时算给老板看) */}
-          <Form.Item shouldUpdate={(prev, curr) => prev.serviceId !== curr.serviceId || prev.usePunchCard !== curr.usePunchCard || prev.serviceFee !== curr.serviceFee}>
+          <Form.Item shouldUpdate={(prev, curr) => prev.serviceId !== curr.serviceId || prev.usePunchCard !== curr.usePunchCard || prev.serviceFee !== curr.serviceFee || prev.addonKeys !== curr.addonKeys}>
             {({ getFieldValue }) => {
               const baseFee = getFieldValue('serviceFee') || 0;
               const checked = getFieldValue('usePunchCard');
               const discount = checked ? 30 : 0;
+              const addonKeys: string[] = getFieldValue('addonKeys') || [];
+              const addonTotal = addonTotalOf(addonKeys);
               const finalNeeded = Math.max(0, baseFee - discount);
 
               return (
                 <div style={{ marginBottom: 16, backgroundColor: '#f9f9f9', padding: '14px', borderRadius: '8px', border: '1px solid #d9d9d9' }}>
-                  <p style={{ margin: '0 0 4px 0', color: '#595959' }}>项目定价: {baseFee} 元</p>
+                  <p style={{ margin: '0 0 4px 0', color: '#595959' }}>项目基础价: {Math.max(0, baseFee - addonTotal)} 元{addonTotal > 0 && <span style={{ color: '#722ed1' }}> ＋ 加项 {addonTotal} 元（{addonLabels({ addonHuangdaoyi: addonKeys.includes('huangdaoyi') ? 10 : 0, addonBaguan: addonKeys.includes('baguan') ? 30 : 0, addonCbd: addonKeys.includes('cbd') ? 25 : 0 })}）</span>}</p>
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #d9d9d9', paddingTop: '8px', marginTop: '4px' }}>
                     <span>打卡券扣减: <span style={{ color: '#ff4d4f' }}>-{discount} 元</span></span>
                     <span>✨ 现场实收总金额: <b style={{ color: '#52c41a', fontSize: '18px' }}>{finalNeeded} 元</b></span>
@@ -552,6 +644,14 @@ export default function LedgerView() {
                 const finalNeeded = val ? Math.max(0, baseFee - 30) : baseFee;
                 form.setFieldsValue({ payCash: finalNeeded, payCard: 0, payGiftCard: 0 });
               }}
+            />
+          </Form.Item>
+
+          {/* 额外加项：可多选，可与打卡减免同时存在 */}
+          <Form.Item label="额外加项 (可多选，与打卡减免可共存)" name="addonKeys" style={{ marginBottom: 16 }}>
+            <Checkbox.Group
+              options={ADDON_OPTIONS}
+              onChange={(keys) => handleAddonChange(keys as string[], form)}
             />
           </Form.Item>
 
@@ -732,6 +832,14 @@ export default function LedgerView() {
                 const finalNeeded = val ? Math.max(0, baseFee - 30) : baseFee;
                 editForm.setFieldsValue({ payCash: finalNeeded, payCard: 0, payGiftCard: 0 });
               }}
+            />
+          </Form.Item>
+
+          {/* 额外加项：可多选，可与打卡减免同时存在 */}
+          <Form.Item label="额外加项 (可多选，与打卡减免可共存)" name="addonKeys" style={{ marginBottom: 16 }}>
+            <Checkbox.Group
+              options={ADDON_OPTIONS}
+              onChange={(keys) => handleAddonChange(keys as string[], editForm)}
             />
           </Form.Item>
 

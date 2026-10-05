@@ -46,5 +46,11 @@ export interface Appointment {
   payGiftCard?: number;
   usePunchCard?: number; // 0 或 1
 
+  // 额外加项（可多选，可与打卡减免共存；金额已含在 serviceFee 内，此处存明细供统计）
+  addonHuangdaoyi?: number; // 黄道益 +10
+  addonBaguan?: number;      // 拔罐 +30
+  addonCbd?: number;         // CBD +25
+
   remark?: string;      // 备注 (如：客户要求力道大一点、加钟等)
+  notes?: string;       // 官网预约附言 (C 端提交的备注，后台"账目备注"列不显示)
 }
