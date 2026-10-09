@@ -24,7 +24,7 @@
 // ============================================================================
 
 export default {
-async fetch(request, env) {
+async fetch(request, env, ctx) {
 const corsHeaders = {
 "Access-Control-Allow-Origin": "*",
 "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -179,7 +179,7 @@ serviceId,
 serviceName,
 appointmentTime,
 duration,
-serviceFee, // 联动关键：前台如果是特价，传过来的就是特价金额，直接计入流水
+serviceFee,
 tip || 0,
 status || 'booked',
 remark,
@@ -194,7 +194,54 @@ addonBaguan || 0,
 addonCbd || 0
 ).run();
 
-return json({ success: true, id: info.meta.last_row_id});
+if (data.source === 'website' && env.CALLMEBOT_PHONE && env.CALLMEBOT_APIKEY) {
+  try {
+    const ps = parseInt(data.partySize, 10) || 1;
+    let ws = appointmentTime;
+    try {
+      const dd = new Date(appointmentTime);
+      if (!isNaN(dd)) {
+        ws = dd.toLocaleString('en-US', {
+          timeZone: 'America/Los_Angeles',
+          month: 'numeric',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit'
+        });
+      }
+    } catch (e) {}
+
+    let zh = '';
+    try {
+      const qr = await env.MY_BINDING.prepare('SELECT name FROM services WHERE id=?').bind(serviceId).first();
+      if (qr && qr.name) zh = qr.name;
+    } catch (e) {}
+
+    const svc = zh ? zh + ' (' + serviceName + ')' : serviceName;
+    const NL = String.fromCharCode(10);
+    const L = [
+      '🔔 *新预约*',
+      '👤 ' + customerName + (customerPhone ? ' · ' + customerPhone : ''),
+      '💆 ' + svc + (duration ? ' · ' + duration + '分钟' : ''),
+      '🕐 ' + ws + (ps > 1 ? ' · 👥 ' + ps + '人' : '')
+    ];
+    if (serviceFee) L.push('💰 预估 $' + serviceFee);
+    if (remark) L.push('📝 ' + remark);
+
+    ctx.waitUntil(
+      fetch(
+        'https://api.callmebot.com/whatsapp.php?phone=' +
+          encodeURIComponent(env.CALLMEBOT_PHONE) +
+          '&text=' +
+          encodeURIComponent(L.join(NL)) +
+          '&apikey=' +
+          encodeURIComponent(env.CALLMEBOT_APIKEY)
+      ).catch(() => {})
+    );
+  } catch (e) {}
+}
+
+return json({ success: true, id: info.meta.last_row_id });
 }
 
 // ==========================================
